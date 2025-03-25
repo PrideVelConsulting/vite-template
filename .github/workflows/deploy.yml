@@ -1,0 +1,60 @@
+name: Test and Deploy
+
+on:
+  push:
+    branches: [main] # Adjust branch name as needed
+  pull_request:
+    branches: [main]
+
+jobs:
+  check_skip:
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: skip_check
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if [[ $COMMIT_MSG == *"no-ci"* ]]; then
+            echo "should_skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_skip=false" >> $GITHUB_OUTPUT
+          fi
+
+  test:
+    needs: check_skip
+    if: needs.check_skip.outputs.should_skip != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up project environment
+        uses: actions/setup-node@v4 # Adjust based on your project type
+        with:
+          node-version: '20' # Adjust version as needed
+
+      - name: Install dependencies
+        run: npm ci # Adjust based on your project
+
+      - name: Run tests
+        run: npm run test # Adjust to your test command
+
+  deploy:
+    needs: [check_skip, test] # Depends on both check_skip and test now
+    if: needs.check_skip.outputs.should_skip != 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            /home/ubuntu/run.sh ${{ github.repository }}
